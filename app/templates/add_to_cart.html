@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Add your head elements here -->
+</head>
+<body>
+    <h1>Add Product to Cart</h1>
+    <form method="POST">
+        {{ add_to_cart_form.hidden_tag() }}
+        <div class="form-group">
+            {{ add_to_cart_form.product_id.label }}
+            {{ add_to_cart_form.product_id(class="form-control") }}
+        </div>
+        <div class="form-group">
+            {{ add_to_cart_form.submit(class="btn btn-primary") }}
+        </div>
+    </form>
+</body>
+</html>

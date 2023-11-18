@@ -1,128 +1,151 @@
-from flask import render_template, redirect, url_for, flash, request
-from flask_login import login_user, current_user, logout_user, login_required
-from .forms import RegistrationForm, LoginForm
-from .models import User, Product, Cart, CartItem
-from werkzeug.security import generate_password_hash, check_password_hash
+from flask import render_template, url_for, flash, redirect, request, session
+from flask_login import login_user, logout_user, login_required, current_user
 from app import app, db
-from datetime import datetime
-
+from app.models import Product, User, Cart
+from app.forms import RegistrationForm, LoginForm, ProductForm  # Import your ProductForm
 
 
 @app.route('/')
-def home():
-  return render_template('index.html')
+def index():
+    products = Product.query.all()
+    return render_template('index.html', products=products)
+
+@app.route('/product/<int:product_id>')
+def product(product_id):
+    product = Product.query.get_or_404(product_id)
+    return render_template('product.html', product=product)
+
+@app.route('/add_to_cart/<int:product_id>', methods=['POST'])
+@login_required
+def add_to_cart(product_id):
+    # Get the product by ID
+    product = Product.query.get_or_404(product_id)
+    
+    # Check if the user already has a cart, or create a new one if not
+    cart = Cart.query.filter_by(user_id=current_user.id).first()
+    if not cart:
+        cart = Cart(user_id=current_user.id)
+        db.session.add(cart)
+    
+    # Check if the product is already in the user's cart
+    if product in cart.products:
+        flash(f'{product.name} is already in your cart', 'info')
+    else:
+        # Add the product to the user's cart
+        cart.products.append(product)
+        db.session.commit()
+        flash(f'Added {product.name} to your cart', 'success')
+    
+    return redirect(url_for('index'))
 
 
+@app.route('/cart')
+@login_required
+def cart():
+    cart = Cart.query.filter_by(user_id=current_user.id).first()
+    
+    if not cart:
+        cart_products = []
+        total_price = 0
+    else:
+        cart_products = cart.products
+        total_price = sum(product.price for product in cart_products)
+    
+    return render_template('cart.html', cart_products=cart_products, total_price=total_price)
 
-@app.route("/signup", methods=["GET", "POST"])
+@app.route('/clear_cart')
+@login_required
+def clear_cart():
+    cart = Cart.query.filter_by(user_id=current_user.id).first()
+    
+    if cart:
+        cart.products = []
+        db.session.commit()
+        flash('Cart cleared', 'success')
+    
+    return redirect(url_for('cart'))
+
+@app.route('/remove_from_cart/<int:product_id>')
+@login_required
+def remove_from_cart(product_id):
+    product = Product.query.get_or_404(product_id)
+    
+    cart = Cart.query.filter_by(user_id=current_user.id).first()
+    
+    if cart and product in cart.products:
+        cart.products.remove(product)
+        db.session.commit()
+        flash(f'Removed {product.name} from your cart', 'success')
+    
+    return redirect(url_for('cart'))
+
+@app.route('/register', methods=['GET', 'POST'])
 def register():
-    if current_user.is_authenticated:
-        return redirect(url_for('app.feed'))
-    form = SignUpForm()
-    if request.method == 'POST':
-        if form.validate():
-            username = form.username.data
-            email = form.email.data
-            password = form.password.data
-
-            user = User(username, email, password)
-            
-            db.session.add(user)
-            db.session.commit()
-
-            flash('Successfully created your account. Sign in now.', "success")
-            return redirect(url_for('login'))
-        else:
-            flash("Invalid form. Please try again.", 'error')
-
+    form = RegistrationForm()
+    if form.validate_on_submit():
+        user = User(username=form.username.data, email=form.email.data)
+        user.set_password(form.password.data)
+        db.session.add(user)
+        db.session.commit()
+        flash('Congratulations, you are now a registered user!', 'success')
+        return redirect(url_for('login'))
     return render_template('register.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    if current_user.is_authenticated:
-        return redirect(url_for('home'))
-
     form = LoginForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(username=form.username.data).first()
-        if user and check_password_hash(user.password, form.password.data):
-            login_user(user, remember=False)
-            return redirect(url_for('home'))
-        else:
-            flash('Login unsuccessful. Please check your username and password.', 'danger')
+        user = User.query.filter_by(email=form.email.data).first()
+        if user is None or not user.check_password(form.password.data):
+            flash('Invalid email or password', 'danger')
+            return redirect(url_for('login'))
+        login_user(user)
+        flash('Logged in successfully', 'success')
+        return redirect(url_for('index'))
     return render_template('login.html', form=form)
 
 
 @app.route('/logout')
-@login_required
 def logout():
-  logout_user()
-  flash('You have been logged out.', 'success')
-  return redirect(url_for('list_products'))
+    # Logout the user using Flask-Login's built-in function
+    logout_user()
+
+    # Clear the session data
+    session.clear()
+
+    # Flash a message to indicate successful logout
+    flash('You have been logged out successfully!', 'success')
+
+    # Redirect the user to the login page or any other desired page
+    return redirect(url_for('login'))
 
 
 
-## app routes
-@app.route('/app', methods=["GET", "POST"])
-def app_page():
-    return render_template('app.html')
 
+from .forms import ProductForm  # Import your ProductForm
 
-@app.route('/products')
-def product_page():
-    return render_template('products.html')
+@app.route('/create_product', methods=['GET', 'POST'])
+@login_required
+def create_product():
+    form = ProductForm()  # Create an instance of your ProductForm
 
+    if request.method == 'POST' and form.validate_on_submit():
+        # Get form data
+        name = form.name.data
+        price = form.price.data
+        description = form.description.data
+        image_url = form.image_url.data
 
+        # Create a new product
+        product = Product(name=name, price=price, description=description, image_url=image_url)
 
-@app.route('/products', methods=['GET'])
-def all_products():
-    products = Product.query.all()
-    return render_template('products.html', products=products)
-
-@app.route('/product/<int:product_id>', methods=['GET'])
-def single_product(product_id):
-    product = Product.query.get(product_id)
-    if product:
-        return render_template('product.html', product=product)
-    return "A product with that ID does not exist.", 404
-
-@app.route('/cart/add/<int:product_id>', methods=['POST'])
-def add_to_cart(product_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    user = User.query.get(session['user_id'])
-    product = Product.query.get(product_id)
-    if user.add_to_cart(product):
+        # Add the product to the database
+        db.session.add(product)
         db.session.commit()
-        return redirect(url_for('show_cart'))
-    return "Product already in cart or does not exist."
 
-@app.route('/cart/remove/<int:product_id>', methods=['POST'])
-def remove_from_cart(product_id):
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    user = User.query.get(session['user_id'])
-    product = Product.query.get(product_id)
-    if user.remove_from_cart(product):
-        db.session.commit()
-        return redirect(url_for('show_cart'))
-    return "Product not found in cart or does not exist."
+        flash('Product created successfully', 'success')
+        return redirect(url_for('product', product_id=product.id))
 
-@app.route('/cart', methods=['GET'])
-def show_cart():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    user = User.query.get(session['user_id'])
-    return render_template('cart.html', cart_products=user.cart_products)
-
-@app.route('/cart/clear', methods=['POST'])
-def clear_cart():
-    if 'user_id' not in session:
-        return redirect(url_for('login'))
-    user = User.query.get(session['user_id'])
-    user.clear_cart()
-    db.session.commit()
-    return redirect(url_for('show_cart'))
-
-
+    # Render the template with the form
+    return render_template('create_product.html', form=form)
 
